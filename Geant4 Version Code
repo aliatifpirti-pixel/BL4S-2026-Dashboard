@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BL4S 2026 — Geant4 Event Display</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'SF Mono','Fira Code','Courier New',monospace}
+#c{width:100vw;height:100vh;display:block}
+#top{position:absolute;top:0;left:0;right:0;padding:10px 16px;background:linear-gradient(to bottom,rgba(0,0,0,.8),transparent);pointer-events:none}
+#top .g4{color:#4488ff;font-size:11px;opacity:.9}
+#top .ph{color:#44ff44;font-size:10px;opacity:.7;margin-top:2px}
+#bot{position:absolute;bottom:0;left:0;right:0;padding:8px 16px;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);display:flex;justify-content:space-between;align-items:flex-end}
+#bot .info{color:#fff;font-size:11px;opacity:.9}
+#bot .sub{color:#aaa;font-size:9px;margin-top:2px}
+#bot .hint{color:#666;font-size:8px;margin-top:2px}
+#legend{position:absolute;top:50px;right:12px;background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:8px 10px}
+#legend .title{color:#888;font-size:8px;margin-bottom:4px;letter-spacing:1px}
+.lrow{display:flex;align-items:center;gap:5px;margin-bottom:2px}
+.lrow .line{width:14px;height:2px;opacity:.8}
+.lrow span{color:#ccc;font-size:8px}
+#ctrl{position:absolute;top:50px;left:12px;display:flex;flex-direction:column;gap:6px}
+#ctrl button{background:rgba(0,80,200,.6);border:1px solid rgba(0,120,255,.4);color:#fff;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:10px;font-family:inherit}
+#ctrl button:hover{background:rgba(0,100,255,.8)}
+#ctrl button.gray{background:rgba(80,80,80,.6);border:1px solid rgba(255,255,255,.15)}
+#detleg{display:flex;gap:12px;margin-bottom:4px;flex-wrap:wrap}
+.drow{display:flex;align-items:center;gap:4px}
+.drow .dot{width:8px;height:8px;border-radius:1px;opacity:.8}
+.drow span{color:#aaa;font-size:8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+ 
+<div id="top">
+  <div class="g4">Geant4 version Name: geant4-11-04 [MT] (5-December-2025)</div>
+  <div class="ph">Physics List: FTFP_BERT | Geometry: bl4s_setup.gdml | viewer-0 (OpenGLImmediateQt)</div>
+</div>
+ 
+<div id="bot">
+  <div>
+    <div class="info">BL4S 2026: p + C → Li, Be, B | T9 Beamline</div>
+    <div class="sub" id="evtInfo">Event #0 | Beam: proton 4 GeV/c | Target: Graphite 10mm</div>
+    <div class="hint">Mouse drag: rotate | Scroll: zoom | Click buttons for controls</div>
+  </div>
+  <div id="detleg">
+    <div class="drow"><div class="dot" style="background:#00ddff"></div><span>Čerenkov</span></div>
+    <div class="drow"><div class="dot" style="background:#00ff44"></div><span>Scintillator</span></div>
+    <div class="drow"><div class="dot" style="background:#cc2222"></div><span>C Target</span></div>
+    <div class="drow"><div class="dot" style="background:#ff3333"></div><span>Tracker</span></div>
+    <div class="drow"><div class="dot" style="background:#4466ff"></div><span>B=0.5T</span></div>
+    <div class="drow"><div class="dot" style="background:#ffcc00"></div><span>dE/dx</span></div>
+    <div class="drow"><div class="dot" style="background:#ff00ff"></div><span>ToF</span></div>
+  </div>
+</div>
+ 
+<div id="legend">
+  <div class="title">TRACKS</div>
+  <div class="lrow"><div class="line" style="background:#4488ff"></div><span>Proton beam</span></div>
+  <div class="lrow"><div class="line" style="background:#ff3333"></div><span>Li (Z=3)</span></div>
+  <div class="lrow"><div class="line" style="background:#00aaff"></div><span>Be (Z=4)</span></div>
+  <div class="lrow"><div class="line" style="background:#33ff33"></div><span>B (Z=5)</span></div>
+  <div class="lrow"><div class="line" style="background:#ffff00"></div><span>π±</span></div>
+  <div class="lrow"><div class="line" style="background:#33cc33"></div><span>Secondaries</span></div>
+</div>
+ 
+<div id="ctrl">
+  <button onclick="newEvent()">/run/beamOn 3</button>
+  <button class="gray" onclick="toggleTracks()">Hide Tracks</button>
+</div>
+ 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const canvas=document.getElementById('c');
+const W=window.innerWidth,H=window.innerHeight;
+ 
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x000000);
+scene.fog=new THREE.FogExp2(0x000000,0.00015);
+ 
+const camera=new THREE.PerspectiveCamera(50,W/H,0.1,10000);
+camera.position.set(400,300,600);
+camera.lookAt(0,0,0);
+ 
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setSize(W,H);
+renderer.setPixelRatio(window.devicePixelRatio);
+ 
+// Lights
+scene.add(new THREE.AmbientLight(0x333344,0.6));
+const dl=new THREE.DirectionalLight(0xffffff,0.8);
+dl.position.set(200,400,300);scene.add(dl);
+const pl=new THREE.PointLight(0x4488ff,0.5,1500);
+pl.position.set(-200,200,0);scene.add(pl);
+ 
+// Grid
+const grid=new THREE.GridHelper(1200,40,0x111133,0x080818);
+grid.position.y=-120;scene.add(grid);
+ 
+// Axes
+const ag=new THREE.Group();
+function makeAxis(color,rot,pos){
+  const g=new THREE.CylinderGeometry(0.8,0.8,150,8);
+  const m=new THREE.MeshBasicMaterial({color});
+  const mesh=new THREE.Mesh(g,m);
+  if(rot)mesh.rotation.copy(rot);
+  mesh.position.copy(pos);
+  ag.add(mesh);
+}
+makeAxis(0xff0000,new THREE.Euler(0,0,-Math.PI/2),new THREE.Vector3(75,0,0));
+makeAxis(0x00ff00,null,new THREE.Vector3(0,75,0));
+makeAxis(0x0066ff,new THREE.Euler(Math.PI/2,0,0),new THREE.Vector3(0,0,75));
+ag.position.set(-350,-100,-300);
+scene.add(ag);
+ 
+// Detector
+const det=new THREE.Group();
+ 
+function addDet(geo,color,op,pos){
+  const sm=new THREE.MeshPhongMaterial({color,transparent:true,opacity:op,side:THREE.DoubleSide,depthWrite:false});
+  const s=new THREE.Mesh(geo,sm);s.position.copy(pos);det.add(s);
+  const wm=new THREE.MeshBasicMaterial({color,wireframe:true,transparent:true,opacity:0.4});
+  const w=new THREE.Mesh(geo.clone(),wm);w.position.copy(pos);det.add(w);
+  const eg=new THREE.EdgesGeometry(geo);
+  const em=new THREE.LineBasicMaterial({color,transparent:true,opacity:0.7});
+  const e=new THREE.LineSegments(eg,em);e.position.copy(pos);det.add(e);
+}
+ 
+// Cherenkov
+const chG=new THREE.CylinderGeometry(45,45,120,24,1,true);
+addDet(chG,0x00ddff,0.08,new THREE.Vector3(0,0,-300));
+const capG=new THREE.CircleGeometry(45,24);
+const capM=new THREE.MeshBasicMaterial({color:0x00ddff,transparent:true,opacity:0.05,side:THREE.DoubleSide});
+const c1=new THREE.Mesh(capG,capM);c1.rotation.x=Math.PI/2;c1.position.set(0,0,-360);det.add(c1);
+const c2=c1.clone();c2.position.set(0,0,-240);det.add(c2);
+ 
+// Front Scint
+addDet(new THREE.BoxGeometry(60,60,4),0x00ff44,0.25,new THREE.Vector3(0,0,-120));
+ 
+// Target
+const tg=new THREE.BoxGeometry(30,30,8);
+const tm=new THREE.MeshPhongMaterial({color:0xcc2222,transparent:true,opacity:0.7});
+const t=new THREE.Mesh(tg,tm);t.position.set(0,0,0);det.add(t);
+const te=new THREE.LineSegments(new THREE.EdgesGeometry(tg),new THREE.LineBasicMaterial({color:0xff4444}));
+te.position.copy(t.position);det.add(te);
+ 
+// Back Scint
+addDet(new THREE.BoxGeometry(60,60,4),0x00ff44,0.25,new THREE.Vector3(0,0,20));
+ 
+// Tracker 1
+addDet(new THREE.BoxGeometry(80,80,1.5),0xff3333,0.15,new THREE.Vector3(0,0,60));
+ 
+// Magnet
+const mg=new THREE.BoxGeometry(100,100,180);
+const mwm=new THREE.MeshBasicMaterial({color:0x2244ff,wireframe:true,transparent:true,opacity:0.15});
+const mm=new THREE.Mesh(mg,mwm);mm.position.set(0,0,160);det.add(mm);
+const me=new THREE.LineSegments(new THREE.EdgesGeometry(mg),new THREE.LineBasicMaterial({color:0x4466ff,transparent:true,opacity:0.6}));
+me.position.copy(mm.position);det.add(me);
+ 
+// B-field arrows
+for(let iz=-60;iz<=60;iz+=40)for(let ix=-30;ix<=30;ix+=30){
+  const ag2=new THREE.ConeGeometry(3,12,6);
+  const am=new THREE.MeshBasicMaterial({color:0x3355ff,transparent:true,opacity:0.3});
+  const a=new THREE.Mesh(ag2,am);a.position.set(ix,30,160+iz);det.add(a);
+  const sg=new THREE.CylinderGeometry(0.8,0.8,20,4);
+  const ss=new THREE.Mesh(sg,am);ss.position.set(ix,18,160+iz);det.add(ss);
+}
+ 
+// Tracker 2
+addDet(new THREE.BoxGeometry(80,80,1.5),0xff3333,0.15,new THREE.Vector3(0,0,260));
+ 
+// dE/dx
+addDet(new THREE.BoxGeometry(80,80,5),0xffcc00,0.2,new THREE.Vector3(0,0,330));
+ 
+// ToF
+addDet(new THREE.BoxGeometry(100,100,8),0xff00ff,0.2,new THREE.Vector3(0,0,420));
+ 
+scene.add(det);
+ 
+// Tracks group
+const tracks=new THREE.Group();
+scene.add(tracks);
+ 
+let evtNum=0;
+ 
+function genTracks(){
+  while(tracks.children.length>0){
+    const ch=tracks.children[0];
+    if(ch.geometry)ch.geometry.dispose();
+    if(ch.material)ch.material.dispose();
+    tracks.remove(ch);
+  }
+  const frags=[{color:0xff3333,prob:.15},{color:0x00aaff,prob:.1},{color:0x33ff33,prob:.08}];
+ 
+  for(let ip=0;ip<3;ip++){
+    const bx=(Math.random()-.5)*6,by=(Math.random()-.5)*6;
+    // Beam
+    const bp=[new THREE.Vector3(bx,by,-500),new THREE.Vector3(bx,by,0)];
+    const bg=new THREE.BufferGeometry().setFromPoints(bp);
+    tracks.add(new THREE.Line(bg,new THREE.LineBasicMaterial({color:0x4488ff,transparent:true,opacity:0.8})));
+ 
+    const nP=2+Math.floor(Math.random()*5);
+    for(let j=0;j<nP;j++){
+      const pts=[new THREE.Vector3(bx,by,0)];
+      const isFrag=Math.random()<0.3;
+      let tc=isFrag?frags[Math.floor(Math.random()*3)].color:(Math.random()>.5?0xffff00:0x00ffaa);
+      let to2=isFrag?0.9:0.4;
+      const ch2=Math.random()>.5?1:-1;
+      const curv=isFrag?ch2*(0.02+Math.random()*0.03):ch2*(0.05+Math.random()*0.1);
+      let dx=(Math.random()-.5)*.8,dy=(Math.random()-.5)*.8,dz=.8+Math.random()*.4;
+      let x=bx,y=by,z=0;
+      for(let s=0;s<80;s++){
+        x+=dx*8;y+=dy*8;z+=dz*8;
+        if(z>70&&z<250){dx+=curv*0.01;dx+=(Math.random()-.5)*.002;dy+=(Math.random()-.5)*.002}
+        pts.push(new THREE.Vector3(x,y,z));
+        if(z>500||Math.abs(x)>400||Math.abs(y)>400)break;
+        if(Math.random()<.005)break;
+      }
+      if(pts.length>2){
+        const tg2=new THREE.BufferGeometry().setFromPoints(pts);
+        tracks.add(new THREE.Line(tg2,new THREE.LineBasicMaterial({color:tc,transparent:true,opacity:to2})));
+        [60,260,330,420].forEach(hz=>{
+          for(let k=0;k<pts.length-1;k++){
+            if(pts[k].z<=hz&&pts[k+1].z>=hz){
+              const f=(hz-pts[k].z)/(pts[k+1].z-pts[k].z);
+              const hx=pts[k].x+f*(pts[k+1].x-pts[k].x);
+              const hy=pts[k].y+f*(pts[k+1].y-pts[k].y);
+              if(Math.abs(hx)<50&&Math.abs(hy)<50){
+                const hg=new THREE.SphereGeometry(2,8,8);
+                const hm=new THREE.MeshBasicMaterial({color:tc,transparent:true,opacity:0.9});
+                const h=new THREE.Mesh(hg,hm);h.position.set(hx,hy,hz);tracks.add(h);
+              }
+              break;
+            }
+          }
+        });
+      }
+    }
+    // Secondaries
+    const nS=3+Math.floor(Math.random()*6);
+    for(let s=0;s<nS;s++){
+      const sp=[new THREE.Vector3(bx,by,0)];
+      const sdx=(Math.random()-.5)*2,sdy=(Math.random()-.5)*2,sdz=(Math.random()-.5)*1.5;
+      let sx=bx,sy=by,sz=0;
+      const steps=Math.floor((30+Math.random()*150)/5);
+      for(let k=0;k<steps;k++){
+        sx+=sdx*5+(Math.random()-.5);sy+=sdy*5+(Math.random()-.5);sz+=sdz*5+(Math.random()-.5);
+        sp.push(new THREE.Vector3(sx,sy,sz));
+      }
+      const sg2=new THREE.BufferGeometry().setFromPoints(sp);
+      tracks.add(new THREE.Line(sg2,new THREE.LineBasicMaterial({color:0x33cc33,transparent:true,opacity:0.2+Math.random()*0.15})));
+    }
+  }
+}
+genTracks();
+ 
+function newEvent(){
+  genTracks();
+  evtNum++;
+  document.getElementById('evtInfo').textContent='Event #'+evtNum+' | Beam: proton 4 GeV/c | Target: Graphite 10mm';
+}
+ 
+let tracksVisible=true;
+function toggleTracks(){
+  tracksVisible=!tracksVisible;
+  tracks.visible=tracksVisible;
+  document.querySelector('#ctrl button.gray').textContent=tracksVisible?'Hide Tracks':'Show Tracks';
+}
+ 
+// Camera controls
+let isDrag=false,px=0,py=0,cTheta=0.6,cPhi=0.4,cDist=700;
+canvas.addEventListener('wheel',e=>{e.preventDefault();cDist+=e.deltaY*0.5;cDist=Math.max(200,Math.min(2000,cDist))},{passive:false});
+canvas.addEventListener('mousedown',e=>{isDrag=true;px=e.clientX;py=e.clientY});
+window.addEventListener('mousemove',e=>{if(!isDrag)return;cTheta-=(e.clientX-px)*0.005;cPhi-=(e.clientY-py)*0.005;cPhi=Math.max(-1.2,Math.min(1.2,cPhi));px=e.clientX;py=e.clientY});
+window.addEventListener('mouseup',()=>isDrag=false);
+ 
+// Touch controls
+let tStart=null;
+canvas.addEventListener('touchstart',e=>{if(e.touches.length===1){isDrag=true;px=e.touches[0].clientX;py=e.touches[0].clientY}},{passive:true});
+canvas.addEventListener('touchmove',e=>{if(!isDrag||e.touches.length!==1)return;const t=e.touches[0];cTheta-=(t.clientX-px)*0.005;cPhi-=(t.clientY-py)*0.005;cPhi=Math.max(-1.2,Math.min(1.2,cPhi));px=t.clientX;py=t.clientY},{passive:true});
+canvas.addEventListener('touchend',()=>isDrag=false);
+ 
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+ 
+function animate(){
+  requestAnimationFrame(animate);
+  if(!isDrag)cTheta+=0.001;
+  camera.position.x=cDist*Math.sin(cTheta)*Math.cos(cPhi);
+  camera.position.y=cDist*Math.sin(cPhi)+50;
+  camera.position.z=cDist*Math.cos(cTheta)*Math.cos(cPhi);
+  camera.lookAt(0,0,60);
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
